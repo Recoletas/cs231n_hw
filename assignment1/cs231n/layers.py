@@ -287,19 +287,12 @@ def batchnorm_backward(dout, cache):
     # 4. 计算 dx 的各个组成部分
     # 根据链式法则，我们需要计算三个部分
     
-    # 第一部分: 直接通过归一化路径
-    dx1 = dx_normalized / std
+    # 正确的反向传播计算
+    dx_hat = dx_normalized
+    dvar = np.sum(dx_hat * (x - sample_mean) * -0.5 * (std**-3), axis=0)
+    dmean = np.sum(dx_hat * -1 / std, axis=0) + dvar * np.mean(-2.0 * (x - sample_mean), axis=0)
     
-    # 第二部分: 通过均值路径
-    dmean = np.sum(dx_normalized * (-1 / std), axis=0)  # 对每个特征维度求和
-    dx2 = dmean / N
-    
-    # 第三部分: 通过方差路径
-    dvar = np.sum(dx_normalized * (x - sample_mean) * (-0.5) * (std ** -3), axis=0)
-    dx3 = dvar * 2 * (x - sample_mean) / N
-    
-    # 5. 合并所有部分得到最终的 dx
-    dx = dx1 + dx2 + dx3
+    dx = dx_hat / std + dvar * 2.0 * (x - sample_mean) / N + dmean / N
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -447,10 +440,12 @@ def layernorm_backward(dout, cache):
     # 计算 dx - 注意：这里归一化是沿着特征维度而不是批次维度
     std = np.sqrt(sample_var + eps)  # 形状 (N, 1)
     
-    # 使用批归一化的简化公式，但调整求和维度
-    dx = (1.0 / (D * std)) * (D * dout * gamma - 
-                              np.sum(dout * gamma, axis=1, keepdims=True) - 
-                              x_normalized * np.sum(dout * gamma * x_normalized, axis=1, keepdims=True))
+    # 层归一化的反向传播（沿特征维度）
+    dx_hat = dout * gamma
+    dvar = np.sum(dx_hat * (x - sample_mean) * -0.5 / (std**3), axis=1, keepdims=True)
+    dmean = np.sum(dx_hat * -1.0 / std, axis=1, keepdims=True) + dvar * np.mean(-2.0 * (x - sample_mean), axis=1, keepdims=True)
+    
+    dx = (dx_hat / std + dvar * 2.0 * (x - sample_mean) / D + dmean / D)
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -578,7 +573,35 @@ def conv_forward_naive(x, w, b, conv_param):
     # TODO: Implement the convolutional forward pass.                         #
     # Hint: you can use the function np.pad for padding.                      #
     ###########################################################################
-
+    stride = conv_param['stride']
+    pad = conv_param['pad']
+    N, C, H, W = x.shape
+    F, C, HH, WW = w.shape
+    
+    # 计算输出尺寸
+    H_out = 1 + (H + 2 * pad - HH) // stride
+    W_out = 1 + (W + 2 * pad - WW) // stride
+    
+    # 初始化输出
+    out = np.zeros((N, F, H_out, W_out))
+    
+    # 对输入进行padding
+    x_padded = np.pad(x, ((0, 0), (0, 0), (pad, pad), (pad, pad)), mode='constant')
+    
+    # 执行卷积操作
+    for n in range(N):  # 遍历每个样本
+        for f in range(F):  # 遍历每个滤波器
+            for i in range(H_out):
+                for j in range(W_out):
+                    # 计算当前感受野的位置
+                    h_start = i * stride
+                    h_end = h_start + HH
+                    w_start = j * stride
+                    w_end = w_start + WW
+                    
+                    # 提取感受野区域并计算卷积
+                    x_slice = x_padded[n, :, h_start:h_end, w_start:w_end]
+                    out[n, f, i, j] = np.sum(x_slice * w[f]) + b[f]
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -603,7 +626,51 @@ def conv_backward_naive(dout, cache):
     ###########################################################################
     # TODO: Implement the convolutional backward pass.                        #
     ###########################################################################
-
+    x, w, b, conv_param = cache
+    stride = conv_param['stride']
+    pad = conv_param['pad']
+    N, C, H, W = x.shape
+    F, C, HH, WW = w.shape
+    N, F, H_out, W_out = dout.shape
+    
+    # 初始化梯度
+    dx = np.zeros_like(x)
+    dw = np.zeros_like(w)
+    db = np.zeros_like(b)
+    
+    # 对输入进行padding（用于dx的计算）
+    x_padded = np.pad(x, ((0, 0), (0, 0), (pad, pad), (pad, pad)), mode='constant')
+    dx_padded = np.pad(dx, ((0, 0), (0, 0), (pad, pad), (pad, pad)), mode='constant')
+    
+    # 计算db - 对每个滤波器的所有位置和所有样本求和
+    for f in range(F):
+        db[f] = np.sum(dout[:, f, :, :])
+    
+    # 计算dw和dx
+    for n in range(N):  # 遍历每个样本
+        for f in range(F):  # 遍历每个滤波器
+            for i in range(H_out):
+                for j in range(W_out):
+                    # 计算当前感受野的位置
+                    h_start = i * stride
+                    h_end = h_start + HH
+                    w_start = j * stride
+                    w_end = w_start + WW
+                    
+                    # 提取感受野区域
+                    x_slice = x_padded[n, :, h_start:h_end, w_start:w_end]
+                    
+                    # 计算dw
+                    dw[f] += x_slice * dout[n, f, i, j]
+                    
+                    # 计算dx
+                    dx_padded[n, :, h_start:h_end, w_start:w_end] += w[f] * dout[n, f, i, j]
+    
+    # 从dx_padded中移除padding部分得到dx
+    if pad > 0:
+        dx = dx_padded[:, :, pad:-pad, pad:-pad]
+    else:
+        dx = dx_padded
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -635,7 +702,32 @@ def max_pool_forward_naive(x, pool_param):
     ###########################################################################
     # TODO: Implement the max-pooling forward pass                            #
     ###########################################################################
-
+    N, C, H, W = x.shape
+    pool_height = pool_param['pool_height']
+    pool_width = pool_param['pool_width']
+    stride = pool_param['stride']
+    
+    # 计算输出尺寸
+    H_out = 1 + (H - pool_height) // stride
+    W_out = 1 + (W - pool_width) // stride
+    
+    # 初始化输出
+    out = np.zeros((N, C, H_out, W_out))
+    
+    # 执行最大池化
+    for n in range(N):  # 遍历每个样本
+        for c in range(C):  # 遍历每个通道
+            for i in range(H_out):
+                for j in range(W_out):
+                    # 计算当前池化区域的位置
+                    h_start = i * stride
+                    h_end = h_start + pool_height
+                    w_start = j * stride
+                    w_end = w_start + pool_width
+                    
+                    # 提取池化区域并取最大值
+                    x_slice = x[n, c, h_start:h_end, w_start:w_end]
+                    out[n, c, i, j] = np.max(x_slice)
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -658,7 +750,37 @@ def max_pool_backward_naive(dout, cache):
     ###########################################################################
     # TODO: Implement the max-pooling backward pass                           #
     ###########################################################################
-
+    x, pool_param = cache
+    N, C, H, W = x.shape
+    pool_height = pool_param['pool_height']
+    pool_width = pool_param['pool_width']
+    stride = pool_param['stride']
+    
+    H_out = 1 + (H - pool_height) // stride
+    W_out = 1 + (W - pool_width) // stride
+    
+    # 初始化dx
+    dx = np.zeros_like(x)
+    
+    # 执行反向传播
+    for n in range(N):  # 遍历每个样本
+        for c in range(C):  # 遍历每个通道
+            for i in range(H_out):
+                for j in range(W_out):
+                    # 计算当前池化区域的位置
+                    h_start = i * stride
+                    h_end = h_start + pool_height
+                    w_start = j * stride
+                    w_end = w_start + pool_width
+                    
+                    # 提取池化区域
+                    x_slice = x[n, c, h_start:h_end, w_start:w_end]
+                    
+                    # 找到最大值的掩码
+                    mask = (x_slice == np.max(x_slice))
+                    
+                    # 将梯度传递给最大值位置
+                    dx[n, c, h_start:h_end, w_start:w_end] += mask * dout[n, c, i, j]
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -696,7 +818,16 @@ def spatial_batchnorm_forward(x, gamma, beta, bn_param):
     # vanilla version of batch normalization you implemented above.           #
     # Your implementation should be very short; ours is less than five lines. #
     ###########################################################################
-
+    N, C, H, W = x.shape
+    
+    # 重塑输入，将空间维度合并到批次维度
+    x_reshaped = x.transpose(0, 2, 3, 1).reshape(-1, C)
+    
+    # 调用普通的批归一化
+    out_reshaped, cache = batchnorm_forward(x_reshaped, gamma, beta, bn_param)
+    
+    # 重塑回原始形状
+    out = out_reshaped.reshape(N, H, W, C).transpose(0, 3, 1, 2)
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -726,7 +857,16 @@ def spatial_batchnorm_backward(dout, cache):
     # vanilla version of batch normalization you implemented above.           #
     # Your implementation should be very short; ours is less than five lines. #
     ###########################################################################
-
+    N, C, H, W = dout.shape
+    
+    # 重塑梯度，将空间维度合并到批次维度
+    dout_reshaped = dout.transpose(0, 2, 3, 1).reshape(-1, C)
+    
+    # 调用普通的批归一化反向传播
+    dx_reshaped, dgamma, dbeta = batchnorm_backward(dout_reshaped, cache)
+    
+    # 重塑回原始形状
+    dx = dx_reshaped.reshape(N, H, W, C).transpose(0, 3, 1, 2)
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -762,7 +902,42 @@ def spatial_groupnorm_forward(x, gamma, beta, G, gn_param):
     # the bulk of the code is similar to both train-time batch normalization  #
     # and layer normalization!                                                #
     ###########################################################################
-
+    N, C, H, W = x.shape
+    
+    # 验证G是否整除C
+    assert C % G == 0, "Number of channels must be divisible by number of groups"
+    
+    # 重塑输入：将通道分成G组
+    # 新形状: (N, G, C//G, H, W)
+    x_grouped = x.reshape(N, G, C // G, H, W)
+    
+    # 计算每个组的均值和方差
+    # 在维度 (C//G, H, W) 上计算，即对每个样本的每个组
+    mean = np.mean(x_grouped, axis=(2, 3, 4), keepdims=True)  # 形状: (N, G, 1, 1, 1)
+    var = np.var(x_grouped, axis=(2, 3, 4), keepdims=True)    # 形状: (N, G, 1, 1, 1)
+    
+    # 归一化
+    x_normalized = (x_grouped - mean) / np.sqrt(var + eps)    # 形状: (N, G, C//G, H, W)
+    
+    # 重塑回原始形状
+    x_normalized = x_normalized.reshape(N, C, H, W)
+    
+    # 应用缩放和偏移
+    out = gamma * x_normalized + beta
+    
+    # 保存中间变量供反向传播使用
+    cache = {
+        'x': x,
+        'x_grouped': x_grouped,
+        'x_normalized': x_normalized,
+        'mean': mean,
+        'var': var,
+        'gamma': gamma,
+        'beta': beta,
+        'G': G,
+        'eps': eps
+    }
+    
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -788,7 +963,37 @@ def spatial_groupnorm_backward(dout, cache):
     # TODO: Implement the backward pass for spatial group normalization.      #
     # This will be extremely similar to the layer norm implementation.        #
     ###########################################################################
-
+    x, x_grouped, x_normalized, mean, var, gamma, beta, G, eps = \
+        cache['x'], cache['x_grouped'], cache['x_normalized'], cache['mean'], cache['var'], \
+        cache['gamma'], cache['beta'], cache['G'], cache['eps']
+    
+    N, C, H, W = x.shape
+    group_size = C // G
+    
+    # 计算dbeta和dgamma
+    dbeta = np.sum(dout, axis=(0, 2, 3), keepdims=True)  # 形状: (1, C, 1, 1)
+    dgamma = np.sum(dout * x_normalized, axis=(0, 2, 3), keepdims=True)  # 形状: (1, C, 1, 1)
+    
+    # 计算dx_normalized
+    dx_normalized = dout * gamma  # 形状: (N, C, H, W)
+    
+    # 将dx_normalized重塑为分组形式
+    dx_normalized_grouped = dx_normalized.reshape(N, G, group_size, H, W)
+    
+    # 计算dx - 使用层归一化的简化公式，但针对分组
+    std = np.sqrt(var + eps)  # 形状: (N, G, 1, 1, 1)
+    
+    # 每个组的元素数量
+    group_elements = group_size * H * W
+    
+    # 计算dx_grouped
+    dx_grouped = (1.0 / (group_elements * std)) * \
+                 (group_elements * dx_normalized_grouped - 
+                  np.sum(dx_normalized_grouped, axis=(2, 3, 4), keepdims=True) - 
+                  (x_grouped - mean) / (var + eps) * np.sum(dx_normalized_grouped * (x_grouped - mean), axis=(2, 3, 4), keepdims=True))
+    
+    # 重塑回原始形状
+    dx = dx_grouped.reshape(N, C, H, W)
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################

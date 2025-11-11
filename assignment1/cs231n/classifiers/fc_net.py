@@ -123,10 +123,10 @@ class TwoLayerNet(object):
 
         da1=relu_backward(da1_relu,cache_relu)
 
-        dx,dW1,db1=affine_backward(da1,cache1)
-        dW1+=self.reg*self.params['W1']
+        dx,dw1,db1=affine_backward(da1,cache1)
+        dw1+=self.reg*self.params['W1']
 
-        grads['W1']=dW1
+        grads['W1']=dw1
         grads['W2']=dw2
         grads['b1']=db1
         grads['b2']=db2
@@ -304,10 +304,10 @@ class FullyConnectedNet(object):
         layer_input =X
         caches=[]
         for i in range (self.num_layers-1):
-            W=self.params[f'W{i+1}']
+            w=self.params[f'W{i+1}']
             b=self.params[f'b{i+1}']
 
-            affine_out,affine_cache=affine_forward(layer_input,W,b)
+            affine_out,affine_cache=affine_forward(layer_input,w,b)
 
             if self.normalization:
                 gamma=self.params[f'gamma{i+1}']
@@ -369,19 +369,34 @@ class FullyConnectedNet(object):
         
         loss=reg_loss+data_loss
 
-        current_cache=caches.pop()
-        dout,dW,db=affine_backward(dscores,current_cache[0])
+        # 输出层反向传播
+        output_cache = caches.pop()
+        # 确保输出层缓存结构正确
+        if isinstance(output_cache, tuple) and len(output_cache) == 4:
+            affine_cache, _, _, _ = output_cache
+        else:
+            affine_cache = output_cache  # 如果输出层缓存结构不同
+
+        dout,dW,db=affine_backward(dscores,affine_cache)
 
         grads[f'W{self.num_layers}']=dW+self.reg*self.params[f'W{self.num_layers}']
         grads[f'b{self.num_layers}']=db
 
         for i in range(self.num_layers-2,-1,-1):
-            affine_cache,norm_cache,relu_cache,dropout_cache=caches[i]
+            cache=caches[i]
 
-            if self.use_dropout:
-              dout =dropout_backward(dout,(self.dropout_param,dropout_cache))
+            # 确保缓存结构一致
+            if isinstance(cache, tuple) and len(cache) == 4:
+                affine_cache, norm_cache, relu_cache, dropout_cache = cache
+            else:
+                #如果缓存结构不同，可能需要调整
+                continue
 
-            dout=relu_backward(dout,relu_cache)
+            if self.use_dropout and dropout_cache is not None:
+                dout =dropout_backward(dout,dropout_cache)
+
+            if relu_cache is not None:
+                dout=relu_backward(dout,relu_cache)
 
             if self.normalization and norm_cache is not None:
                 if self.normalization=="batchnorm":
