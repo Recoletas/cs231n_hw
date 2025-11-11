@@ -284,13 +284,11 @@ def batchnorm_backward(dout, cache):
     # 3. 计算样本方差的梯度
     std = np.sqrt(sample_var + eps)  # 标准差
     
-    # 4. 计算 dx 的各个组成部分
-    # 根据链式法则，我们需要计算三个部分
     
     # 正确的反向传播计算
     dx_hat = dx_normalized
     dvar = np.sum(dx_hat * (x - sample_mean) * -0.5 * (std**-3), axis=0)
-    dmean = np.sum(dx_hat * -1 / std, axis=0) + dvar * np.mean(-2.0 * (x - sample_mean), axis=0)
+    dmean = np.sum(dx_hat * -1.0 / std, axis=0) + dvar * np.mean(-2.0 * (x - sample_mean), axis=0)
     
     dx = dx_hat / std + dvar * 2.0 * (x - sample_mean) / N + dmean / N
     ###########################################################################
