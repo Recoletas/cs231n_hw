@@ -304,23 +304,23 @@ class FullyConnectedNet(object):
         layer_input =X
         caches=[]
         for i in range (self.num_layers-1):
-           W=self.params[f'W{i+1}']
-           b=self.params[f'b{i+1}']
+            W=self.params[f'W{i+1}']
+            b=self.params[f'b{i+1}']
 
-           affine_out,affine_cache=affine_forward(layer_input,W,b)
+            affine_out,affine_cache=affine_forward(layer_input,W,b)
 
-           if self.normalization:
-            gamma=self.params[f'gamma{i+1}']
-            beta=self.params[f'beta{i+1}']
-            bn_param=self.bn_params[i] if i<len(self.bn_params) else {}
+            if self.normalization:
+                gamma=self.params[f'gamma{i+1}']
+                beta=self.params[f'beta{i+1}']
+                bn_param=self.bn_params[i] if i<len(self.bn_params) else {}
 
-            if self.normalization=="batchnorm":
-               norm_out,norm_cache=batchnorm_forward(affine_out,gamma,beta,bn_param)
-            elif self.normalization=="layernorm":
-               norm_out,norm_cache=layernorm_forward(affine_out,gamma,beta,bn_param)
+                if self.normalization=="batchnorm":
+                    norm_out,norm_cache=batchnorm_forward(affine_out,gamma,beta,bn_param)
+                elif self.normalization=="layernorm":
+                    norm_out,norm_cache=layernorm_forward(affine_out,gamma,beta,bn_param)
             else:
-               norm_out=affine_out
-               norm_cache=None
+                norm_out=affine_out
+                norm_cache=None
 
             relu_out,relu_cache=relu_forward(norm_out)
 
@@ -376,26 +376,26 @@ class FullyConnectedNet(object):
         grads[f'b{self.num_layers}']=db
 
         for i in range(self.num_layers-2,-1,-1):
-           affine_cache,norm_cache,relu_cache,dropout_cache=caches[i]
+            affine_cache,norm_cache,relu_cache,dropout_cache=caches[i]
 
-           if self.use_dropout:
+            if self.use_dropout:
               dout =dropout_backward(dout,(self.dropout_param,dropout_cache))
 
-           dout=relu_backward(dout,relu_backward)
+            dout=relu_backward(dout,relu_cache)
 
-        if self.normalization:
-           if self.normalization=="batchnorm":
-              dout,dgamma,dbeta=batchnorm_backward(dout,norm_cache)
-           elif self.normalization=="layernorm":
-              dout,dgamma,dbeta=layernorm_backward(dout,norm_cache)\
+            if self.normalization and norm_cache is not None:
+                if self.normalization=="batchnorm":
+                    dout,dgamma,dbeta=batchnorm_backward(dout,norm_cache)
+                elif self.normalization=="layernorm":
+                    dout,dgamma,dbeta=layernorm_backward(dout,norm_cache)
               
-           grads[f'gamma{i+1}']=dgamma
-           grads[f'beta{i+1}']=dbeta
+                grads[f'gamma{i+1}']=dgamma
+                grads[f'beta{i+1}']=dbeta
 
-        dout,dW,db=affine_backward(dout,affine_cache)
+            dout,dW,db=affine_backward(dout,affine_cache)
 
-        grads[f'W{i+1}']=dW+self.reg*self.params[f'W{i+1}']
-        grads[f'b{i+1}']=db
+            grads[f'W{i+1}']=dW+self.reg*self.params[f'W{i+1}']
+            grads[f'b{i+1}']=db
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
