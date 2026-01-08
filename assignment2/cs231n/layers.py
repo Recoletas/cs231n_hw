@@ -642,7 +642,7 @@ def conv_backward_naive(dout, cache):
                     h_start,w_start=i*stride,j*stride
                     h_end,w_end=h_start+HH,w_start+WW
                     dw[f]+=x_pad[n,:,h_start:h_end,w_start:w_end]*dout[n,f,i,j]
-                    dx_pad[n,:h_start:h_end,w_start:w_end]+=w[f]*dout[n,f,i,j]
+                    dx_pad[n,:,h_start:h_end,w_start:w_end]+=w[f]*dout[n,f,i,j]
     if pad>0:
         dx=dx_pad[:,:,pad:-pad,pad:-pad]
     else:
