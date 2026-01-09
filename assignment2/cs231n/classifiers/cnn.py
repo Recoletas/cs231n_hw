@@ -105,7 +105,11 @@ class ThreeLayerConvNet(object):
         # Remember you can use the functions defined in cs231n/fast_layers.py and  #
         # cs231n/layer_utils.py in your implementation (already imported).         #
         ############################################################################
-        # 
+        
+
+        out_1,cache_1=conv_relu_pool_forward(X,W1,b1,conv_param,pool_param)
+        out_2,cache_2=affine_relu_forward(out_1,W2,b2)
+        scores,cache_3=affine_forward(out_2,W3,b3)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -124,7 +128,18 @@ class ThreeLayerConvNet(object):
         # automated tests, make sure that your L2 regularization includes a factor #
         # of 0.5 to simplify the expression for the gradient.                      #
         ############################################################################
-        # 
+        loss,dscores=softmax_loss(scores,y)
+        reg=self.reg
+        loss+=0.5*reg*(np.sum(W1**2)+np.sum(W2**2)+np.sum(W3**2))
+        dout3,dW3,db3=affine_backward(dscores,cache_3)
+        grads['W3']=dW3+reg*W3
+        grads['b3']=db3
+        dout2,dW2,db2=affine_relu_backward(dout3,cache_2)
+        grads['W2']=dW2+reg*W2
+        grads['b2']=db2
+        dout1,dW1,db1=conv_relu_pool_backward(dout2,cache_1)
+        grads['W1']=dW1+reg*W1
+        grads['b1']=db1
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
